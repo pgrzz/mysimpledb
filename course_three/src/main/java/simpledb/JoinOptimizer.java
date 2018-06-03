@@ -82,7 +82,8 @@ public class JoinOptimizer {
      * the amount of data that must be read over the course of the query, as
      * well as the number of CPU opertions performed by your join. Assume that
      * the cost of a single predicate application is roughly 1.
-     * 
+     * joincost(t1 join t2) = scancost(t1) + ntups(t1) x scancost(t2) //IO cost
+     + ntups(t1) x ntups(t2)  //CPU cost
      * 
      * @param j
      *            A LogicalJoinNode representing the join operation being
@@ -98,7 +99,19 @@ public class JoinOptimizer {
      *            Estimated cost of one full scan of the table on the right-hand
      *            side of the query
      * @return An estimate of the cost of this query, in terms of cost1 and
-     *         cost2
+     *         # disk I/Os = B(S)
+
+    (2) # fragments Si read: B(S)/(M−1) times
+
+    For each fragment Si, algorithm read R once
+
+    # disk I/Os = B(S)/(M−1) × B(R)
+
+
+    So:
+    B(S)
+    Total cost = B(S) + ------- B(R)
+    M-1
      */
     public double estimateJoinCost(LogicalJoinNode j, int card1, int card2,
             double cost1, double cost2) {
@@ -107,11 +120,24 @@ public class JoinOptimizer {
             // You do not need to implement proper support for these for Project 3.
             return card1 + cost1 + cost2;
         } else {
+            double cost=-1.0;
+            if(j.p== Predicate.Op.EQUALS){
+                // hash join
+                cost=cost1+cost2+card1*card2;
+            }else {
+                // nestloopblockjoin
+//                TupleDesc desc = p.getTupleDesc(j.t1Alias);
+//                int blockSize = Join.blockMemory / desc.getSize();      //对于blocksize其实可以用一个恒定值而不是去拿因为相对于同一个表来说blocksize是核定的
+                int blockSize=10;
+                 cost = cost1 + cost1/(blockSize-1) * cost2 + (double) card1 * (double) card2;
+
+            }
+            return cost;
             // some code goes here.
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic nested-loops
             // join.
-            return -1.0;
+
         }
     }
 
@@ -148,15 +174,44 @@ public class JoinOptimizer {
     }
     /**
      * Estimate the join cardinality of two tables.
+     * 对于等式连接，当其中一个属性是主键时，连接产生的元组数量不能大于非主键属性的基数。
+     对于没有主键的等式连接，很难说输出的大小是多少
+     - 它可能是表的基数乘积的大小（如果两个表的值都相同元组） -
+     或者它可以是0.构建一个简单的启发式（比如，两个表中较大的那个）的大小就可以。
+     对于范围扫描，同样很难说出关于尺寸的任何准确信息。
+     输出的大小应该与输入的大小成正比。
+     假定交叉产品的固定比例是通过范围扫描（例如30％）发射的，这很好。通常，范围连接的成本应该大于两个相同大小的表的非主键等同连接的成本。
      * */
     public static int estimateTableJoinCardinality(Predicate.Op joinOp,
             String table1Alias, String table2Alias, String field1PureName,
             String field2PureName, int card1, int card2, boolean t1pkey,
             boolean t2pkey, Map<String, TableStats> stats,
             Map<String, Integer> tableAliasToId) {
-        int card = 1;
+        int card ;
         // some code goes here
-        return card <= 0 ? 1 : card;
+            switch (joinOp){
+                case EQUALS:
+                    if(t1pkey && t2pkey){
+                        card=card1>card2?card2:card1;
+                    }else if(t1pkey){
+                        card=card1;
+                    }else if(t2pkey){
+                        card=card2;
+                    }else{
+                        card=card1>card2?card1:card2;
+                    }
+                    break;
+                case GREATER_THAN:
+                case GREATER_THAN_OR_EQ:
+                case LESS_THAN_OR_EQ:
+                case LESS_THAN:
+                    card= (int) (card1*card2*0.3);
+                    break;
+                    default:
+                        card=card1*card2;
+
+            }
+        return card<=0?1:card ;
     }
 
     /**
@@ -168,6 +223,8 @@ public class JoinOptimizer {
      * @param size
      *            The size of the subsets of interest
      * @return a set of all subsets of the specified size
+     *  构造子空间 的具体用法
+     *  http://www.mathcs.emory.edu/~cheung/Courses/554/Syllabus/5-query-opt/dyn-prog-join3.html
      */
     @SuppressWarnings("unchecked")
     public <T> Set<Set<T>> enumerateSubsets(Vector<T> v, int size) {
@@ -193,6 +250,13 @@ public class JoinOptimizer {
     }
 
     /**
+     * 连接顺序的意义？
+     *  对于只有两个关系时， 对于我们的连接算法（nestloopjoin,hashjoin,indexjoin,mergejoin）考虑参数顺序，
+     *  左参数作为较小的关系存储在主存中。称为 构造用关系
+     *  每次一块读入连接的右参数，称为探查用关系。
+     *  对于大于两个关系时则构建左深树。
+     *  为什么采用左深树？
+     *  因为左深树对于连接算法有更好的适配性相比较于右深和浓密树。
      * Compute a logical, reasonably efficient join on the specified tables. See
      * project description for hints on how this should be implemented.
      * 
@@ -211,6 +275,9 @@ public class JoinOptimizer {
      * @throws ParsingException
      *             when stats or filter selectivities is missing a table in the
      *             join, or or when another internal error occurs
+     *             http://www.mathcs.emory.edu/~cheung/Courses/554/Syllabus/5-query-opt/left-deep-trees.html
+     *             http://www.mathcs.emory.edu/~cheung/Courses/554/Syllabus/5-query-opt/best-left-deep-tree.html
+     *             http://www.mathcs.emory.edu/~cheung/Courses/554/Syllabus/5-query-opt/dyn-prog-join3.html
      */
     public Vector<LogicalJoinNode> orderJoins(
             HashMap<String, TableStats> stats,
@@ -222,7 +289,30 @@ public class JoinOptimizer {
 
         // some code goes here
         //Replace the following
-        return joins;
+        int numJoinNodes = joins.size();
+        PlanCache pc = new PlanCache();
+        Set<LogicalJoinNode> wholeSet = null;
+        for (int i = 1; i <= numJoinNodes; i++) {
+            Set<Set<LogicalJoinNode>> setOfSubset = this.enumerateSubsets(this.joins, i);
+            for (Set<LogicalJoinNode> s : setOfSubset) {
+                if (s.size() == numJoinNodes) {
+                    wholeSet = s;//将动态规划产生的最后节点记录其引用
+                }
+                Double bestCostSofar = Double.MAX_VALUE;
+                CostCard bestPlan = new CostCard();
+                for (LogicalJoinNode toRemove : s) {
+                    CostCard plan = computeCostAndCardOfSubplan(stats, filterSelectivities, toRemove, s, bestCostSofar, pc);
+                    if (plan != null) {
+                        bestCostSofar = plan.cost;
+                        bestPlan = plan;
+                    }
+                }
+                if (bestPlan.plan != null) {
+                    pc.addPlan(s, bestPlan.cost, bestPlan.card, bestPlan.plan);
+                }
+            }
+        }
+        return pc.getOrder(wholeSet);
     }
 
     // ===================== Private Methods =================================
@@ -232,7 +322,7 @@ public class JoinOptimizer {
      * joinToRemove to joinSet (joinSet should contain joinToRemove), given that
      * all of the subsets of size joinSet.size() - 1 have already been computed
      * and stored in PlanCache pc.
-     * 
+     *
      * @param stats
      *            table stats for all of the tables, referenced by table names
      *            rather than alias (see {@link #orderJoins})
@@ -393,7 +483,7 @@ public class JoinOptimizer {
     /**
      * Return true if field is a primary key of the specified table, false
      * otherwise
-     * 
+     *
      * @param tableAlias
      *            The alias of the table in the query
      * @param field

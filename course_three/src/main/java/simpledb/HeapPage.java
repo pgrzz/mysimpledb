@@ -89,8 +89,8 @@ public class HeapPage implements Page {
     private int getHeaderSize() {        
         
         // some code goes here
-        //这里的参数是 double的如果不传8.0 会被向下取导致入参不正确 具体看 Math.ceil的定义
-          return (int) Math.ceil(getNumTuples()/8.0);
+            double double_value=getNumTuples()/8.0;
+          return (int) Math.ceil(double_value); //Math.ceil 向上取整
                  
     }
     

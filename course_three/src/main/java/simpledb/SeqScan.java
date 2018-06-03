@@ -88,19 +88,25 @@ public class SeqScan implements DbIterator {
      * prefixed with the tableAlias string from the constructor. This prefix
      * becomes useful when joining tables containing a field(s) with the same
      * name.
-     * 
+     * todo 2018/5/39这个方法必须深拷贝
      * @return the TupleDesc with field names from the underlying HeapFile,
      *         prefixed with the tableAlias string from the constructor.
      */
     public TupleDesc getTupleDesc() {
         // some code goes here
-        TupleDesc tupleDesc=Database.getCatalog().getTupleDesc(tableid);
-            tupleDesc.items.forEach(var->{
-                String prefix=getAlias()==null?"null.":getAlias()+".";
-                String fieldName=var.fieldName==null?"null":var.fieldName;
-                var.fieldName=prefix+fieldName;
-            });
-        return tupleDesc;
+        TupleDesc desc = Database.getCatalog().getTupleDesc(tableid);
+        int fieldNum = desc.numFields();
+        Type[] types = new Type[fieldNum];
+        String[] names = new String[fieldNum];
+        for (int i = 0; i < fieldNum; i++) {
+            types[i] = desc.getFieldType(i);
+            //按照构造器中所说，为了防止意外的null值使此类停止工作，故要加入一些判断
+            String prefix = getAlias() == null ? "null." : getAlias() + ".";
+            String fieldName = desc.getFieldName(i);
+            fieldName = fieldName == null ? "null" : fieldName;
+            names[i] = prefix + fieldName;
+        }
+        return new TupleDesc(types, names);
     }
 
     public boolean hasNext() throws TransactionAbortedException, DbException {

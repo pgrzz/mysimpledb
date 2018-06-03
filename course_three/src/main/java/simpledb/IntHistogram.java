@@ -1,9 +1,15 @@
 package simpledb;
 
 /** A class to represent a fixed-width histogram over a single integer-based field.
+ * todo 2018-5-29 该版本未实现 V(R,a) 对应的tuple统计关系再下一版本考虑
  */
 public class IntHistogram {
 
+    private int[] histogram;
+    private int weight;
+    private int nTuple;
+    private int min;
+    private int max;
     /**
      * Create a new IntHistogram.
      * 
@@ -22,6 +28,12 @@ public class IntHistogram {
      */
     public IntHistogram(int buckets, int min, int max) {
     	// some code goes here
+        // weight=(max-min+1)/buckets;
+        double range = (double) (max - min + 1) / buckets;
+        weight = (int) Math.ceil(range);    //向上取正 默认 强制类型转换是向下取正
+        histogram=new int[buckets];
+        this.min=min;
+        this.max=max;
     }
 
     /**
@@ -30,6 +42,9 @@ public class IntHistogram {
      */
     public void addValue(int v) {
     	// some code goes here
+        int index=value2Index(v);
+        histogram[index]=histogram[index]+1;
+        nTuple++;
     }
 
     /**
@@ -37,15 +52,72 @@ public class IntHistogram {
      * 
      * For example, if "op" is "GREATER_THAN" and "v" is 5, 
      * return your estimate of the fraction of elements that are greater than 5.
-     * 
+     *
      * @param op Operator
      * @param v Value
      * @return Predicted selectivity of this particular operator and value
      */
     public double estimateSelectivity(Predicate.Op op, int v) {
+        // some code goes here
+        int index=value2Index(v);
+        int left = index * weight + min;
+        int right=left+weight-1;
+            double result=-1.0;
+            double part_weight;
+            double part_height;
+            double part_tuple;
+            int temp_tuple;
+                switch (op){
+                    case EQUALS:
+                        if(v<min || v>max){
+                            return 0.0;
+                        }
+                        result=(histogram[index])*1.0/weight/nTuple;    //能够这样子处理主要是因为有前提假设值满足均匀分布，但是值一般是服从zipfian分布
+                        break;
+                    case GREATER_THAN:
+                        if(v<min){
+                            return 1.0;
+                        }else if(v>max){
+                            return 0.0;
+                        }
+                         part_weight=(right-v)/weight;
+                         part_height=(histogram[index]);
+                         part_tuple=part_weight*part_height/nTuple;    //这里也是基于前提假设值满足 均匀分布
+                        temp_tuple=0;
+                        for(int i=index+1;i<histogram.length;i++){
+                            temp_tuple+=histogram[i];
+                        }
+                        double pright=temp_tuple*1.0/nTuple;
+                        result=part_tuple+pright;
+                        break;
+                    case LESS_THAN:
+                        if(v<min){
+                            return 0.0;
+                        }else if(v>max){
+                            return 1.0;
+                        }
+                         part_weight=(v-left)/weight;
+                         part_height=(histogram[index]);
+                         part_tuple=part_weight*part_height/nTuple;     ////这里也是基于前提假设值满足 均匀分布
+                        temp_tuple=0;
+                         for(int i=index-1;i>=0;i--){
+                             temp_tuple+=histogram[i];
+                         }
+                        double pleft=temp_tuple*1.0/nTuple;
+                        result=part_tuple+pleft;
+                        break;
+                    case NOT_EQUALS:
+                        return 1 - estimateSelectivity(Predicate.Op.EQUALS, v);
+                    case LIKE:
+                        return avgSelectivity();
+                    case LESS_THAN_OR_EQ:
+                        return estimateSelectivity(Predicate.Op.LESS_THAN, v) + estimateSelectivity(Predicate.Op.EQUALS, v);
+                    case GREATER_THAN_OR_EQ:
+                        return estimateSelectivity(Predicate.Op.GREATER_THAN, v) + estimateSelectivity(Predicate.Op.EQUALS, v);
+                }
 
-    	// some code goes here
-        return -1.0;
+
+        return result;
     }
     
     /**
@@ -70,4 +142,13 @@ public class IntHistogram {
         // some code goes here
         return null;
     }
+    private int value2Index(int v){
+        if(v==max){
+            return histogram.length-1;
+        }else{
+            return (v-min)/weight;
+        }
+    }
+
+
 }

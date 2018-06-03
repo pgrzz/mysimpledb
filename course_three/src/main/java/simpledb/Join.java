@@ -29,7 +29,7 @@ public class Join extends Operator {
     // 增大该参数可以更大程度减少磁盘IO，并充分利用已经优化过的内存中的Join算法
     // 对于测试案例中的两个大表的Join，使用默认大小需要25s，使用2倍大小需要15s，
     // 5倍需要10s，10倍则需要6s，所以权衡时间和空间的消耗来说，5倍比较合适
-    private static final int blockMemory=131072*5;
+    public static final int blockMemory=131072*5;
 
     /**
      * Constructor. Accepts to children to join and the predicate to join them
@@ -156,7 +156,9 @@ public class Join extends Operator {
         this.right = children[1];
     }
 
-
+    /**
+     * 对于 NestedLoopJoin 来说就是简单的传统遍历 复杂度 O(N*M)
+     */
     private TupleIterator NestedLoopJoin() throws DbException, TransactionAbortedException {
         List<Tuple> tuples=new ArrayList<>();
         Tuple  t1,t2;
@@ -173,6 +175,16 @@ public class Join extends Operator {
         }
         return new TupleIterator(getTupleDesc(),tuples);
     }
+
+    /**
+     * BlockNestedLoopJoin 算法上主要是对IO的优化
+     * 对于每一次右表的next都需要IO操作。所有对于左表来说。每次取一批来与右表来进行比较。那么复杂度为
+     * http://www.mathcs.emory.edu/~cheung/Courses/554/Syllabus/4-query-exec/nested-join.html
+     *    (1) The algorithm will read S once:
+
+
+     *  主要缩减了右表的IO次数
+     */
     private TupleIterator BlockNestedLoopJoin() throws DbException, TransactionAbortedException {
         List<Tuple> tuples=new ArrayList<>();
         int blockSize = blockMemory / left.getTupleDesc().getSize();//131072是MySql中该算法的默认缓冲区大小 只用对左表缓存
@@ -204,7 +216,7 @@ public class Join extends Operator {
     private TupleIterator HashJoin() throws DbException, TransactionAbortedException {
         List<Tuple> tuples=new ArrayList<>();
        //根据要join的Id进行分组
-       HashMap<Integer,List<Tuple>> leftMap=new HashMap<>();    //一个桶对应分组JoinId相同的Tuple
+       HashMap<Integer,List<Tuple>> leftMap=new HashMap<>();    //一个桶对应分组JoinId相同的Tuple     现在的桶力度特别小，最多情况为重复的值为0则桶数量=元组数量
        HashMap<Integer,List<Tuple>> rightMap=new HashMap<>();
        while (left.hasNext()){
            Tuple temp=left.next();

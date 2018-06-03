@@ -49,7 +49,8 @@ public class Catalog {
         //check
         for (Map.Entry<Integer, Table> entry : tables.entrySet()) {
             if(entry.getValue().tableName.equals(name)){
-                throw new IllegalArgumentException("name不合法");
+                // todo 在测试bigOrderJoinsTest 的时候会产生表名冲突
+               // throw new UnsupportedOperationException("目前不支持添加相同名字的table");
             }
 
         }
@@ -153,7 +154,10 @@ public class Catalog {
      */
     public void loadSchema(String catalogFile) {
         String line = "";
-        String baseFolder=new File(catalogFile).getParent();
+        // TODO: 18-5-18 我加了这句话，因为如果用户给的catalog是相对路径，将会出错，所以这里先转换成绝对路径
+        // TODO: 18-5-18  另外要注意的是表格的.dat文件必须和catalog同一个文件夹下才不会出错
+        String absolutePath=new File(catalogFile).getAbsolutePath();
+        String baseFolder = new File(absolutePath).getParent();
         try {
             BufferedReader br = new BufferedReader(new FileReader(new File(catalogFile)));
             

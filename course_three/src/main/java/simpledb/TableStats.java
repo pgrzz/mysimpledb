@@ -3,6 +3,7 @@ package simpledb;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -17,6 +18,8 @@ public class TableStats {
 
     static final int IOCOSTPERPAGE = 1000;
 
+    static final int DEFAULT_PREHIST=100;
+
     public static TableStats getTableStats(String tablename) {
         return statsMap.get(tablename);
     }
@@ -24,6 +27,25 @@ public class TableStats {
     public static void setTableStats(String tablename, TableStats stats) {
         statsMap.put(tablename, stats);
     }
+
+
+    private double totalIOCost;
+    private  EstimatesPair[] pairs;
+    private int totalTuple;
+
+    /**
+     *  用来帮助记录值
+     */
+    class EstimatesPair{
+        int max;
+        int min;
+        int total;
+        Type fieldType;
+        String fieldName;
+
+
+    }
+    private Map<String,Object> pairs2Hist=new HashMap<>();
     
     public static void setStatsMap(HashMap<String,TableStats> s)
     {
@@ -31,13 +53,7 @@ public class TableStats {
             java.lang.reflect.Field statsMapF = TableStats.class.getDeclaredField("statsMap");
             statsMapF.setAccessible(true);
             statsMapF.set(null, s);
-        } catch (NoSuchFieldException e) {
-            e.printStackTrace();
-        } catch (SecurityException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
@@ -85,6 +101,84 @@ public class TableStats {
         // necessarily have to (for example) do everything
         // in a single scan of the table.
         // some code goes here
+           HeapFile dbFile=(HeapFile)Database.getCatalog().getDbFile(tableid);
+         totalIOCost=dbFile.numPages()*ioCostPerPage;
+         TupleDesc desc= dbFile.getTupleDesc();
+        pairs=new EstimatesPair[dbFile.getTupleDesc().items.size()] ;
+         for(int i=0;i<dbFile.getTupleDesc().items.size();i++){
+             pairs[i]=new EstimatesPair();
+             pairs[i].fieldType=dbFile.getTupleDesc().items.get(i).fieldType;
+             pairs[i].fieldName=dbFile.getTupleDesc().items.get(i).toString();
+         }
+            try {
+                DbFileIterator dbFileIterator=  dbFile.iterator(new TransactionId());
+                 dbFileIterator.open();
+              while (dbFileIterator.hasNext()){             // 第一次循环对于每一个值统计min,max,
+                  Tuple tuple=dbFileIterator.next();
+
+                  for(int i=0;i<desc.numFields();i++){
+                      Field field= tuple.getField(i);
+                      switch (field.getType()){
+                          case INT_TYPE:
+                              if(field instanceof IntField){
+                                  int value=((IntField) field).getValue();
+                                  if(pairs[i].max<value){
+                                      pairs[i].max=value;
+                                  }
+                                  if(pairs[i].min>value){
+                                      pairs[i].min=value;
+                                  }
+                                  pairs[i].total++;
+                              }
+                              break;
+                          case STRING_TYPE:
+                              pairs[i].total++;
+                              break;
+                    }
+
+                  }
+                totalTuple++;
+              }
+
+              dbFileIterator.rewind();
+
+              for(int i=0;i<pairs.length;i++){          //对每一个值构建统计图
+                    switch (pairs[i].fieldType){
+                        case INT_TYPE:
+                            pairs2Hist.put(pairs[i].fieldName,new IntHistogram(DEFAULT_PREHIST,pairs[i].min,pairs[i].max));
+                            break;
+                        case STRING_TYPE:
+                            pairs2Hist.put(pairs[i].fieldName,new StringHistogram(DEFAULT_PREHIST));
+                            break;
+                    }
+              }
+
+              while (dbFileIterator.hasNext()){         //插入信息到统计中
+                  Tuple tuple=dbFileIterator.next();
+                  for(int i=0;i<desc.numFields();i++){
+                      Field field=  tuple.getField(i);
+                      switch (field.getType()){
+                          case INT_TYPE:
+                              if(field instanceof IntField){
+                                  int value=((IntField) field).getValue();
+                                  IntHistogram intHistogram= (IntHistogram) pairs2Hist.get(pairs[i].fieldName);
+                                  intHistogram.addValue(value);
+                              }
+                              break;
+                          case STRING_TYPE:
+                              String value=field.toString();
+                              StringHistogram stringHistogram= (StringHistogram) pairs2Hist.get(pairs[i].fieldName);
+                              stringHistogram.addValue(value);
+                              break;
+                      }
+                  }
+
+              }
+              dbFileIterator.close();
+            }catch (Exception e){
+                e.printStackTrace();
+            }
+
     }
 
     /**
@@ -101,7 +195,7 @@ public class TableStats {
      */
     public double estimateScanCost() {
         // some code goes here
-        return 0;
+        return totalIOCost;
     }
 
     /**
@@ -115,7 +209,7 @@ public class TableStats {
      */
     public int estimateTableCardinality(double selectivityFactor) {
         // some code goes here
-        return 0;
+        return  (int)Math.ceil(totalTuples()*selectivityFactor);
     }
 
     /**
@@ -130,6 +224,15 @@ public class TableStats {
      * */
     public double avgSelectivity(int field, Predicate.Op op) {
         // some code goes here
+        EstimatesPair pair=pairs[field];
+            switch (pair.fieldType){
+                case STRING_TYPE:
+                    StringHistogram stringHistogram= (StringHistogram) pairs2Hist.get(pair.fieldName);
+                        return stringHistogram.avgSelectivity();
+                case INT_TYPE:
+                    IntHistogram intHistogram= (IntHistogram) pairs2Hist.get(pair.fieldName);
+                        return intHistogram.avgSelectivity();
+            }
         return 1.0;
     }
 
@@ -148,6 +251,15 @@ public class TableStats {
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
         // some code goes here
+        EstimatesPair pair=pairs[field];
+        switch (pair.fieldType){
+            case STRING_TYPE:
+                StringHistogram stringHistogram= (StringHistogram) pairs2Hist.get(pair.fieldName);
+                return stringHistogram.estimateSelectivity(op,constant.toString());
+            case INT_TYPE:
+                IntHistogram intHistogram= (IntHistogram) pairs2Hist.get(pair.fieldName);
+                return intHistogram.estimateSelectivity(op,((IntField)constant).getValue());
+        }
         return 1.0;
     }
 
@@ -156,7 +268,7 @@ public class TableStats {
      * */
     public int totalTuples() {
         // some code goes here
-        return 0;
+        return totalTuple;
     }
 
 }
