@@ -10,7 +10,8 @@ import javax.swing.tree.*;
  * optimally, and for selecting the best instantiation of a join for a given
  * logical plan.
  * ggggefegegrrrrr
- * ggggefegegvvb
+ * twetwetewt
+ * xxv
  */
 public class JoinOptimizer {
     LogicalPlan p;
