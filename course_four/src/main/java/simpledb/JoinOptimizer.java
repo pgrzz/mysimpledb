@@ -9,6 +9,7 @@ import javax.swing.tree.*;
  * The JoinOptimizer class is responsible for ordering a series of joins
  * optimally, and for selecting the best instantiation of a join for a given
  * logical plan.
+ * gggg
  */
 public class JoinOptimizer {
     LogicalPlan p;
