@@ -18,6 +18,10 @@ public class Permissions {
     return "UNKNOWN";
   }
 
+  public  static int getPermLevel(Permissions permissions) {
+    return permissions.permLevel;
+  }
+
   public static final Permissions READ_ONLY = new Permissions(0);
   public static final Permissions READ_WRITE = new Permissions(1);
 

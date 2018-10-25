@@ -189,6 +189,8 @@ public class Catalog {
                             System.exit(0);
                         }
                     }
+                    //todo 添加version支持mvcc乐观锁
+                    addVersionfield(names,types);
                 }
                 Type[] typeAr = types.toArray(new Type[0]);
                 String[] namesAr = names.toArray(new String[0]);
@@ -209,6 +211,10 @@ public class Catalog {
         return tables.containsKey(id);
     }
 
+    private void addVersionfield(List<String> names,List<Type> types){
+        names.add("tb_version");
+        types.add(Type.INT_TYPE);
+    }
 
 }
 

@@ -35,7 +35,7 @@ public class BufferPool {
      * @param numPages maximum number of pages in this buffer pool.
      */
 
-    private TransactionId transactionId;
+
 
     private Permissions permissions;
 
@@ -67,7 +67,7 @@ public class BufferPool {
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
             throws TransactionAbortedException, DbException {
         // some code goes here
-       this.transactionId=tid;
+
 
        this.permissions=perm;
            Page page= cache.get(pid);
@@ -222,10 +222,10 @@ public class BufferPool {
         // some code goes here
         // not necessary for proj1
         try {
-            Page page=  getPage(transactionId,pid,permissions);
+            Page page=  getPage(null,pid,permissions);
         DbFile dbFile= Database.getCatalog().getDbFile(pid.getTableId());
         dbFile.writePage(page);
-        page.markDirty(false,transactionId);
+        page.markDirty(false,null);
         } catch (TransactionAbortedException e) {
             e.printStackTrace();
         } catch (DbException e) {
