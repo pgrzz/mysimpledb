@@ -3,12 +3,19 @@ package simpledb;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class LockManager {
 
     private Map<PageId,List<PageStatus>>  pageLockMap=new ConcurrentHashMap<>();
 
     private Map<TransactionId,PageId> tx=new ConcurrentHashMap<>();
+
+    public ReentrantLock lock=new ReentrantLock(true);
+
+
+    public Condition condition=lock.newCondition();
 
 
 
@@ -31,7 +38,7 @@ public class LockManager {
 
                  }else{
                      // todo 外部对这个 tid的重试逻辑 ,等到 其他tid的X 锁得到释放加入参tid X 锁或者S 锁这样避免了 X锁被饿死
-                    wait(tid,pid);
+                     addWaitStatus(tid,pid);
                     return false;
                      //等待列表等待
                  }
@@ -44,11 +51,13 @@ public class LockManager {
                     return true;
                 }else{
                     lockSorX(tid,pid, perm);
+                    removeWaitStatus(tid);
                     return true;
                 }
             }
         }else{
             lockSorX(tid,pid, perm);
+            removeWaitStatus(tid);
             return true;
         }
 
@@ -70,10 +79,10 @@ public class LockManager {
         return tx.containsKey(tid);
     }
 
-    void wait(TransactionId tid, PageId pid){
+    void addWaitStatus(TransactionId tid, PageId pid){
         tx.put(tid,pid);
     }
-    void notify(TransactionId tid){
+    void removeWaitStatus(TransactionId tid){
         tx.remove(tid);
 
     }
