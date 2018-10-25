@@ -5,8 +5,9 @@ import simpledb.util.LRUCache;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -40,6 +41,8 @@ public class BufferPool {
     private Permissions permissions;
 
     private  final Map<PageId,Page> cache;
+
+    private LockManager lockManager;
 
 
 
@@ -98,6 +101,7 @@ public class BufferPool {
     public  void releasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for proj1
+        lockManager.unloock(tid,pid);
     }
 
     /**
@@ -107,6 +111,7 @@ public class BufferPool {
      */
     public void transactionComplete(TransactionId tid) throws IOException {
         // some code goes here
+        lockManager.releaseTidLocks(tid);
         // not necessary for proj1
     }
 
@@ -114,7 +119,7 @@ public class BufferPool {
     public boolean holdsLock(TransactionId tid, PageId p) {
         // some code goes here
         // not necessary for proj1
-        return false;
+        return lockManager.holdLock(tid,p);
     }
 
     /**
@@ -128,6 +133,30 @@ public class BufferPool {
         throws IOException {
         // some code goes here
         // not necessary for proj1
+        lockManager.releaseTidLocks(tid);
+        if(commit){
+            flushPages(tid);
+        }else{
+            //rollback
+            List<PageId> list= lockManager.getAllPageIdByTid(tid);
+            list.forEach(pid->{
+                try {
+                    HeapPage heapPage =(HeapPage)getPage(tid,pid,Permissions.READ_ONLY);
+                    heapPage=   heapPage.getBeforeImage();
+                    DbFile dbFile= Database.getCatalog().getDbFile(pid.getTableId());
+                    dbFile.writePage(heapPage);
+                } catch (TransactionAbortedException e) {
+                    e.printStackTrace();
+                } catch (DbException e) {
+                    e.printStackTrace();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            });
+            list.forEach(this::discardPage);
+        }
+
+
     }
 
     /**
@@ -223,9 +252,12 @@ public class BufferPool {
         // not necessary for proj1
         try {
             Page page=  getPage(null,pid,permissions);
-        DbFile dbFile= Database.getCatalog().getDbFile(pid.getTableId());
-        dbFile.writePage(page);
-        page.markDirty(false,null);
+            if(page.isDirty()!=null){
+                DbFile dbFile= Database.getCatalog().getDbFile(pid.getTableId());
+                dbFile.writePage(page);
+                page.markDirty(false,null);
+                discardPage(pid);
+            }
         } catch (TransactionAbortedException e) {
             e.printStackTrace();
         } catch (DbException e) {
@@ -234,11 +266,45 @@ public class BufferPool {
 
     }
 
+   private ThreadPoolExecutor threadPoolExecutor=new ThreadPoolExecutor(5, 20, 30, TimeUnit.MILLISECONDS,
+       new ArrayBlockingQueue<>(20), new ThreadFactory() {
+       @Override
+       public Thread newThread(Runnable r) {
+           return new Thread("flush page thread");
+       }
+   });
+
     /** Write all pages of the specified transaction to disk.
      */
     public synchronized  void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for proj1
+        List<PageId> pageIds= lockManager.getAllPageIdByTid(tid);
+
+            pageIds.forEach(pageId-> {
+                try {
+                  HeapPage heapPage=(HeapPage) Database.getBufferPool().getPage(tid,pageId,Permissions.READ_ONLY);
+
+                  if(heapPage.isDirty()!=null){
+                      threadPoolExecutor.execute(()->{
+                          try {
+                              flushPage(pageId);
+                          } catch (IOException e) {
+                              e.printStackTrace();
+                          }
+                      });
+
+                  }
+                } catch (TransactionAbortedException e) {
+                    e.printStackTrace();
+                } catch (DbException e) {
+                    e.printStackTrace();
+                }
+
+            });
+
+
+
     }
 
     /**

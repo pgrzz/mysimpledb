@@ -1,9 +1,6 @@
 package simpledb;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -92,6 +89,31 @@ public class LockManager {
 
 
 
+    boolean holdLock(TransactionId tid, PageId pid){
+        List<PageStatus> list=    pageLockMap.get(pid);
+        if(list==null ||list.size()<1){return false;}
+
+        PageStatus pageStatus= list.stream().filter(a->a.tid==tid).findFirst().orElse(null);
+        return pageStatus!=null;
+    }
+
+
+    void releaseTidLocks(TransactionId tid){
+        List<PageId> pageIds= getAllPageIdByTid(tid);
+        pageIds.forEach(a->unloock(tid,a));
+    }
+
+    List<PageId> getAllPageIdByTid(TransactionId tid){
+        List<PageId> list=new LinkedList<>();
+        pageLockMap.forEach((k,v)->{
+            long o=  v.stream().filter(status->status.tid.equals(tid)).count();
+              if(o>0){
+                  list.add(k);
+              }
+        });
+        return list;
+
+    }
 
 
     class PageStatus{
